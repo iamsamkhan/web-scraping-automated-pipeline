@@ -126,7 +126,7 @@ bash
 Run the FastAPI server:
 
 bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 Access the API documentation:
 
 Swagger UI: http://localhost:8000/docs
@@ -137,3 +137,537 @@ Test the API:
 
 bash
 python test_email_api.py
+
+
+
+
+🌟 Features
+1. Web Scraping Module
+Scrapes student names and email IDs from university websites
+
+Supports both static pages (BeautifulSoup4) and JavaScript-rendered content (Selenium)
+
+Intelligent parsing of various website structures
+
+Email validation and normalization
+
+Multiple scraping strategies
+
+2. AI-Powered Paper Generation
+Generates personalized academic papers for each student
+
+Multiple AI backend support (OpenAI, Llama 2, fallback mode)
+
+Professional DOCX formatting with styles
+
+Includes all academic paper sections:
+
+Abstract
+
+Introduction
+
+Literature Review
+
+Methodology
+
+Results
+
+Discussion
+
+Conclusion
+
+References
+
+3. Email Automation System
+Bulk email sending with rate limiting
+
+Personalized email templates with Jinja2
+
+DOCX attachment support
+
+Test mode for safe testing
+
+Comprehensive logging and tracking
+
+Email configuration validation
+
+4. RESTful API
+FastAPI-based endpoints
+
+Interactive API documentation (Swagger/ReDoc)
+
+Background task processing
+
+Real-time status monitoring
+
+File download endpoints
+
+Statistics and analytics
+
+📁 Project Structure
+text
+university_scraper/
+├── app/
+│   ├── api/
+│   │   ├── endpoints.py          # Scraping endpoints
+│   │   └── email_endpoints.py    # Email & document endpoints
+│   ├── core/
+│   │   └── config.py            # Configuration management
+│   ├── models/
+│   │   └── schemas.py           # Pydantic schemas
+│   ├── scraper/
+│   │   ├── base_scraper.py      # Base scraper class
+│   │   └── university_scrapers.py # University-specific scrapers
+│   ├── email_service/
+│   │   ├── ai_paper_generator.py # AI paper generation
+│   │   ├── email_sender.py      # Email sending logic
+│   │   └── template_manager.py  # Template management
+│   ├── document_generator/
+│   │   ├── docx_generator.py    # DOCX document generation
+│   │   └── content_formatter.py # Content formatting
+│   └── utils/
+│       └── helpers.py           # Utility functions
+├── templates/
+│   ├── email_templates/         # Email HTML templates
+│   └── paper_templates/         # Paper templates
+├── output/
+│   └── papers/                  # Generated papers storage
+├── logs/                        # Application logs
+├── data/                        # Data files
+└── models/                      # AI model storage (optional)
+🚀 Quick Start
+Prerequisites
+Python 3.8+
+
+Chrome/Firefox browser (for Selenium)
+
+Git
+
+Installation
+Clone the repository:
+
+bash
+git clone <repository-url>
+cd university_scraper
+Create virtual environment:
+
+bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+Install dependencies:
+
+bash
+pip install -r requirements.txt
+Set up environment variables:
+
+bash
+cp .env.example .env
+# Edit .env with your configuration
+Install ChromeDriver (for Selenium):
+
+bash
+# On Ubuntu/Debian:
+sudo apt-get install -y chromium-chromedriver
+
+# On macOS:
+brew install --cask chromedriver
+
+# On Windows: Automatically installed by webdriver-manager
+⚙️ Configuration
+Edit .env file:
+
+env
+# API Configuration
+API_V1_PREFIX=/api/v1
+PROJECT_NAME=Academic Research Automation
+VERSION=2.0.0
+
+# Email Configuration (Required for email sending)
+EMAIL_SENDER=your-email@gmail.com
+EMAIL_PASSWORD=your-app-password  # Use app password for Gmail
+EMAIL_SENDER_NAME=Academic Research Team
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+USE_SSL=false
+
+# AI Configuration (Optional)
+OPENAI_API_KEY=your-openai-api-key
+LLAMA_MODEL_PATH=models/llama-2-7b-chat.Q4_K_M.gguf
+
+# Rate Limiting
+EMAILS_PER_HOUR=500
+DELAY_BETWEEN_EMAILS=2
+🏃‍♂️ Running the Application
+Start the FastAPI server:
+bash
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+The API will be available at:
+
+API Documentation: http://localhost:8000/docs
+
+ReDoc Documentation: http://localhost:8000/redoc
+
+Health Check: http://localhost:8000/health
+
+📚 API Endpoints
+Scraping Endpoints (/api/v1)
+POST /scrape - Scrape student data from university URLs
+
+GET /students - Get scraped student data
+
+GET /students/search - Search students
+
+GET /universities - Get list of scraped universities
+
+Email Automation Endpoints (/api/v1/email)
+POST /generate-papers - Generate academic papers
+
+POST /send-emails - Send emails with paper attachments
+
+POST /batch-process - Complete batch workflow
+
+GET /status/{task_id} - Check email sending status
+
+GET /download-papers - Download papers as ZIP
+
+GET /templates - List email templates
+
+GET /statistics - Get email statistics
+
+🎯 Usage Examples
+1. Scrape University Data
+python
+import requests
+
+scrape_data = {
+    "url": "https://www.university.edu/directory",
+    "university_name": "Example University",
+    "use_selenium": False
+}
+
+response = requests.post(
+    "http://localhost:8000/api/v1/scrape",
+    json=scrape_data
+)
+print(response.json())
+2. Generate Papers for Students
+python
+paper_config = {
+    "student_ids": [1, 2, 3],
+    "model_type": "fallback",
+    "output_format": "docx"
+}
+
+response = requests.post(
+    "http://localhost:8000/api/v1/email/generate-papers",
+    json=paper_config
+)
+print(response.json())
+3. Send Emails with Papers
+python
+email_config = {
+    "student_ids": [1, 2, 3],
+    "subject_template": "Research Paper: {paper_title}",
+    "test_mode": True,
+    "email_config": {
+        "sender_email": "your-email@gmail.com",
+        "sender_password": "your-password",
+        "sender_name": "Research Team"
+    }
+}
+
+response = requests.post(
+    "http://localhost:8000/api/v1/email/send-emails",
+    json=email_config
+)
+print(response.json())
+4. Complete Batch Processing
+bash
+curl -X POST "http://localhost:8000/api/v1/email/batch-process" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "generate_papers": true,
+    "send_emails": true,
+    "paper_config": {
+      "model_type": "fallback"
+    },
+    "email_config": {
+      "test_mode": true
+    }
+  }'
+🔧 Advanced Configuration
+AI Model Configuration
+Using OpenAI:
+
+python
+paper_config = {
+    "model_type": "openai",
+    "api_key": "your-openai-api-key",
+    "output_format": "docx"
+}
+Using Local Llama Model:
+
+Download Llama 2 model:
+
+bash
+mkdir -p models
+# Download Llama 2 7B Chat model (GGUF format)
+# Place in models/ directory
+Configure:
+
+python
+paper_config = {
+    "model_type": "llama",
+    "output_format": "docx"
+}
+Custom Email Templates
+Create custom template in templates/email_templates/:
+
+html
+<!-- custom_template.html -->
+{% extends "base.html" %}
+
+{% block content %}
+    <h2>Dear {{ student_name }},</h2>
+    <!-- Your custom content -->
+{% endblock %}
+Use custom template:
+
+python
+email_config = {
+    "body_template": "custom_template",
+    # ... other config
+}
+📊 Monitoring and Logs
+View Logs
+bash
+# Email logs
+tail -f logs/email_log.json
+
+# Application logs (if using uvicorn with --log-config)
+Check Statistics
+bash
+curl "http://localhost:8000/api/v1/email/statistics?period=week"
+Monitor Background Tasks
+bash
+# Check status of a task
+curl "http://localhost:8000/api/v1/email/status/{task_id}"
+🐛 Troubleshooting
+Common Issues
+Email sending fails:
+
+Verify SMTP credentials in .env
+
+Use app password for Gmail (not regular password)
+
+Check firewall/port settings
+
+Selenium scraping fails:
+
+Ensure Chrome/Firefox is installed
+
+Update webdriver: webdriver-manager update
+
+Check browser compatibility
+
+AI generation fails:
+
+Verify API keys for OpenAI/Anthropic
+
+Check internet connection for API calls
+
+Ensure model files exist for local models
+
+Rate limiting issues:
+
+Adjust EMAILS_PER_HOUR in .env
+
+Increase DELAY_BETWEEN_EMAILS
+
+Debug Mode
+Run with verbose logging:
+
+bash
+uvicorn app.main:app --reload --log-level debug
+🔒 Security Considerations
+Email Credentials:
+
+Never commit .env file to version control
+
+Use app-specific passwords
+
+Rotate passwords regularly
+
+API Security:
+
+Use HTTPS in production
+
+Implement authentication/authorization
+
+Rate limit endpoints
+
+Data Privacy:
+
+Comply with GDPR/other regulations
+
+Anonymize student data when possible
+
+Secure storage of generated documents
+
+Web Scraping Ethics:
+
+Respect robots.txt
+
+Implement rate limiting
+
+Use for educational purposes only
+
+🧪 Testing
+Run Test Suite
+bash
+# Install test dependencies
+pip install pytest pytest-asyncio httpx
+
+# Run tests
+pytest tests/
+Manual Testing
+Use the provided test script:
+
+bash
+python test_email_api.py
+📈 Performance Optimization
+Database Integration:
+
+Add PostgreSQL/MySQL for production
+
+Implement connection pooling
+
+Add database migrations with Alembic
+
+Caching:
+
+Add Redis for caching
+
+Cache frequently accessed data
+
+Implement request caching
+
+Background Processing:
+
+Use Celery for heavy tasks
+
+Implement task queues
+
+Add retry mechanisms
+
+File Storage:
+
+Use cloud storage (S3, GCS)
+
+Implement CDN for file distribution
+
+Add file compression
+
+🤝 Contributing
+Fork the repository
+
+Create a feature branch
+
+Commit your changes
+
+Push to the branch
+
+Open a Pull Request
+
+Development Guidelines
+Follow PEP 8 style guide
+
+Add type hints for new functions
+
+Write docstrings for all public methods
+
+Add tests for new features
+
+Update documentation
+
+📄 License
+This project is licensed under the apache License - see the LICENSE file for details.
+
+🙏 Acknowledgments
+FastAPI for the web framework
+
+BeautifulSoup4 for web scraping
+
+Selenium for browser automation
+
+OpenAI for AI capabilities
+
+python-docx for document generation
+
+  Support
+For issues and questions:
+
+Check the Issues page
+
+Create a new issue with detailed description
+
+Email: smshad0001S.com
+
+🎨 System Architecture Diagram
+text
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   University    │    │    FastAPI      │    │   Email/SMTP    │
+│     Websites    ├───►│     Server      ├───►│     Server      │
+│                 │    │                 │    │                 │
+└─────────────────┘    └────────┬────────┘    └─────────────────┘
+                                 │
+                                 │
+                    ┌────────────▼────────────┐
+                    │                         │
+                    │      Background         │
+                    │       Workers           │
+                    │                         │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │                         │
+                    │       Storage           │
+                    │  (Database/Files/Logs)  │
+                    │                         │
+                    └─────────────────────────┘
+🔄 Workflow
+Scrape Phase:
+
+Collect student data from universities
+
+Validate and normalize emails
+
+Store in temporary database
+
+Generation Phase:
+
+Generate personalized papers using AI
+
+Create professional DOCX documents
+
+Store in output directory
+
+Distribution Phase:
+
+Send emails with paper attachments
+
+Track delivery status
+
+Generate reports
+
+Monitoring Phase:
+
+Monitor system health
+
+Generate statistics
+
+Handle failures
+
+Happy Researching! 🎓📚
+ 
+ Shamshad Ahmed 
