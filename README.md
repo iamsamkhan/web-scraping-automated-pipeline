@@ -17,8 +17,9 @@ A FastAPI-based web scraping application that extracts student names and email I
 
 1. **Clone the repository:**
 ```bash
-git clone <repository-url>
-cd university_scraper.
+git clone <https://github.com/iamsamkhan/web-scraping-automated-pipeline.git>
+
+cd web-scraping-automated-pipeline.
 
 
 
