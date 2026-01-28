@@ -1,0 +1,471 @@
+name: Academic Research Automation CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Daily security scans
+    - cron: '0 2 * * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: '3.10'
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  # Job 1: Code Quality and Testing
+  code-quality:
+    name: Code Quality & Testing
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        cache-dependency-path: '**/requirements*.txt'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          chromium-browser \
+          chromium-chromedriver \
+          libpq-dev \
+          build-essential
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+        pip install pytest-cov black flake8 mypy bandit safety
+
+    - name: Lint with Black
+      run: |
+        black --check --diff app/ tests/
+
+    - name: Lint with Flake8
+      run: |
+        flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Type checking with MyPy
+      run: |
+        mypy app/ --ignore-missing-imports
+
+    - name: Security scan with Bandit
+      run: |
+        bandit -r app/ -f json -o bandit-report.json || true
+        bandit -r app/ -ll
+
+    - name: Dependency security check
+      run: |
+        safety check --full-report
+
+    - name: Run tests with pytest
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+        TEST_MODE: "true"
+      run: |
+        pytest tests/ \
+          --cov=app \
+          --cov-report=xml \
+          --cov-report=html \
+          --cov-report=term \
+          --junitxml=junit/test-results.xml \
+          -v
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          junit/test-results.xml
+          coverage.xml
+          htmlcov/
+          bandit-report.json
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  # Job 2: Docker Build and Security Scan
+  docker-build-scan:
+    name: Docker Build & Security Scan
+    runs-on: ubuntu-22.04
+    needs: code-quality
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+        build-args: |
+          PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Docker image size check
+      run: |
+        docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | grep "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+  # Job 3: Integration and Performance Tests
+  integration-tests:
+    name: Integration & Performance Tests
+    runs-on: ubuntu-22.04
+    needs: [code-quality, docker-build-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Start application with Docker Compose
+      run: |
+        docker-compose -f docker-compose.test.yml up -d
+        sleep 30  # Wait for services to start
+
+    - name: Run integration tests
+      run: |
+        docker-compose -f docker-compose.test.yml exec api pytest tests/integration/ \
+          --cov=app \
+          --cov-append \
+          -v
+
+    - name: Load test with Locust
+      run: |
+        docker-compose -f docker-compose.test.yml run --rm locust \
+          -f /locust/locustfile.py \
+          --headless \
+          -u 100 \
+          -r 10 \
+          --run-time 1m \
+          --host http://api:8000
+
+    - name: Stop Docker Compose
+      if: always()
+      run: |
+        docker-compose -f docker-compose.test.yml down
+
+    - name: Upload integration test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-results
+        path: |
+          locust-report.html
+          integration-test-results.xml
+
+  # Job 4: Deployment to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-22.04
+    needs: [integration-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.research-automation.example.com
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_STAGING }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_STAGING }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Deploy to ECS (Staging)
+      run: |
+        aws ecs update-service \
+          --cluster research-automation-staging \
+          --service api-service \
+          --force-new-deployment
+
+    - name: Run smoke tests on staging
+      run: |
+        curl --retry 5 --retry-delay 10 \
+          https://staging.research-automation.example.com/health
+        
+        python scripts/smoke_test.py \
+          --url https://staging.research-automation.example.com
+
+    - name: Notify Slack on success
+      if: success()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: "✅ Staging deployment successful: ${{ github.repository }}"
+        fields: repo,commit,author,workflow
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Job 5: Deployment to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-22.04
+    needs: [deploy-staging]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://research-automation.example.com
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Wait for staging approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.token }}
+        approvers: team-leads
+        minimum-approvals: 1
+        issue-title: "Production Deployment Approval"
+        issue-body: "Please review and approve the production deployment"
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Deploy to ECS (Production)
+      run: |
+        # Blue-Green Deployment
+        aws ecs update-service \
+          --cluster research-automation-production \
+          --service api-service \
+          --force-new-deployment
+        
+        # Wait for deployment to complete
+        aws ecs wait services-stable \
+          --cluster research-automation-production \
+          --services api-service
+
+    - name: Run comprehensive tests on production
+      run: |
+        python scripts/production_test.py \
+          --url https://research-automation.example.com
+        
+        # API endpoint tests
+        curl -X POST \
+          https://research-automation.example.com/api/v1/health/check \
+          -H "Authorization: Bearer ${{ secrets.API_TOKEN }}"
+
+    - name: Update deployment status
+      run: |
+        echo "Production deployment completed at $(date)" >> deployment.log
+        aws s3 cp deployment.log s3://research-automation-logs/
+
+    - name: Notify stakeholders
+      if: success()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: "🚀 Production deployment successful: ${{ github.repository }}"
+        fields: repo,commit,author,workflow
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Job 6: Monitoring and Alerting Setup
+  monitoring-setup:
+    name: Monitoring Setup
+    runs-on: ubuntu-22.04
+    needs: [deploy-production]
+    if: success() && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Configure monitoring alerts
+      run: |
+        python scripts/setup_monitoring.py \
+          --environment production \
+          --slack-channel alerts-production
+        
+        # Setup CloudWatch alarms
+        aws cloudwatch put-metric-alarm \
+          --alarm-name "High-Error-Rate" \
+          --metric-name "5xxErrorCount" \
+          --namespace "ResearchAutomation" \
+          --statistic "Sum" \
+          --period 300 \
+          --evaluation-periods 1 \
+          --threshold 10 \
+          --comparison-operator "GreaterThanThreshold" \
+          --alarm-actions "${{ secrets.SNS_TOPIC_ARN }}"
+
+  # Job 7: Documentation Generation
+  documentation:
+    name: Documentation Generation
+    runs-on: ubuntu-22.04
+    if: always()
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Generate API documentation
+      run: |
+        docker run --rm \
+          -v $(pwd):/app \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+          python -c "from app.main import app; import json; \
+          print(json.dumps(app.openapi(), indent=2))" > openapi.json
+
+    - name: Generate metrics report
+      run: |
+        python scripts/generate_metrics.py \
+          --test-results junit/test-results.xml \
+          --coverage coverage.xml \
+          --output metrics-report.json
+
+    - name: Deploy documentation to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs
+        destination_dir: ./docs
+        keep_files: true
+
+  # Job 8: Cleanup
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-22.04
+    if: always()
+    
+    steps:
+    - name: Clean Docker resources
+      run: |
+        docker system prune -af
+        
+    - name: Remove old artifacts
+      uses: c-hive/gha-remove-artifacts@v1
+      with:
+        age: '7 days'
+        skip-tags: true
+
+  # Job 9: Post-Deployment Validation
+  post-deployment-validation:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-22.04
+    needs: [deploy-production]
+    if: success()
+    
+    steps:
+    - name: Run canary tests
+      run: |
+        python scripts/canary_test.py \
+          --url https://research-automation.example.com \
+          --percentage 10
+        
+    - name: Validate data integrity
+      run: |
+        python scripts/validate_database.py \
+          --env production
+        
+    - name: Performance benchmark
+      run: |
+        ab -n 1000 -c 100 \
+          https://research-automation.example.com/api/v1/health
