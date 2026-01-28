@@ -1,0 +1,49 @@
+{
+  "dashboard": {
+    "title": "Blue-Green Deployment",
+    "panels": [
+      {
+        "title": "Traffic Distribution",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{namespace=\"research-automation-bg\", deployment_color=\"blue\"}[5m]))",
+            "legendFormat": "Blue"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{namespace=\"research-automation-bg\", deployment_color=\"green\"}[5m]))",
+            "legendFormat": "Green"
+          }
+        ]
+      },
+      {
+        "title": "Error Rate Comparison",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{namespace=\"research-automation-bg\", status=~\"5..\", deployment_color=\"blue\"}[5m])) / sum(rate(http_requests_total{namespace=\"research-automation-bg\", deployment_color=\"blue\"}[5m]))",
+            "legendFormat": "Blue Error Rate"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{namespace=\"research-automation-bg\", status=~\"5..\", deployment_color=\"green\"}[5m])) / sum(rate(http_requests_total{namespace=\"research-automation-bg\", deployment_color=\"green\"}[5m]))",
+            "legendFormat": "Green Error Rate"
+          }
+        ]
+      },
+      {
+        "title": "Response Time (P95)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{namespace=\"research-automation-bg\", deployment_color=\"blue\"}[5m]))",
+            "legendFormat": "Blue P95"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{namespace=\"research-automation-bg\", deployment_color=\"green\"}[5m]))",
+            "legendFormat": "Green P95"
+          }
+        ]
+      }
+    ]
+  }
+}

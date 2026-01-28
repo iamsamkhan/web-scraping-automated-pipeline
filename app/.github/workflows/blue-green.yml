@@ -1,0 +1,315 @@
+name: Blue-Green Deployment
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - staging
+        - production
+      deployment_strategy:
+        description: 'Deployment strategy'
+        required: true
+        default: 'canary'
+        type: choice
+        options:
+        - blue-green
+        - canary
+        - all-at-once
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  K8S_NAMESPACE: research-automation-bg
+  BLUE_GREEN_ENABLED: true
+
+jobs:
+  # Build and test (same as before)
+  build-test:
+    uses: ./.github/workflows/ci-cd.yml
+    with:
+      environment: ${{ github.event.inputs.environment || 'production' }}
+    secrets: inherit
+
+  # Blue-Green Deployment
+  blue-green-deploy:
+    name: Blue-Green Deployment
+    runs-on: ubuntu-22.04
+    needs: build-test
+    if: needs.build-test.result == 'success'
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+      url: https://research-automation.example.com
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install kubernetes prometheus-api-client
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Configure kubectl
+      run: |
+        aws eks update-kubeconfig \
+          --name research-automation-cluster \
+          --region ${{ secrets.AWS_REGION }}
+    
+    - name: Get current deployment status
+      id: status
+      run: |
+        python scripts/blue-green-deploy.py \
+          --action status \
+          --namespace ${{ env.K8S_NAMESPACE }}
+        
+        CURRENT_COLOR=$(kubectl get configmap blue-green-config \
+          -n ${{ env.K8S_NAMESPACE }} \
+          -o jsonpath='{.data.active-color}')
+        echo "current_color=$CURRENT_COLOR" >> $GITHUB_OUTPUT
+    
+    - name: Deploy to inactive environment
+      id: deploy
+      run: |
+        IMAGE_TAG="${GITHUB_SHA::8}"
+        
+        CURRENT_COLOR="${{ steps.status.outputs.current_color }}"
+        TARGET_COLOR="green"
+        if [[ "$CURRENT_COLOR" == "green" ]]; then
+          TARGET_COLOR="blue"
+        fi
+        
+        echo "Deploying to $TARGET_COLOR environment"
+        
+        # Deploy new version
+        python scripts/blue-green-deploy.py \
+          --action deploy \
+          --image-tag $IMAGE_TAG \
+          --namespace ${{ env.K8S_NAMESPACE }}
+        
+        echo "target_color=$TARGET_COLOR" >> $GITHUB_OUTPUT
+        echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Run automated tests on new deployment
+      run: |
+        TARGET_COLOR="${{ steps.deploy.outputs.target_color }}"
+        
+        # Get service URL for target color
+        SERVICE_URL=$(kubectl get service api-$TARGET_COLOR-service \
+          -n ${{ env.K8S_NAMESPACE }} \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        
+        # Run smoke tests
+        python scripts/smoke_test.py \
+          --url http://$SERVICE_URL \
+          --timeout 60
+        
+        # Run API tests
+        python scripts/test_api_endpoints.py \
+          --base-url http://$SERVICE_URL \
+          --deployment-color $TARGET_COLOR
+    
+    - name: Start canary deployment
+      if: github.event.inputs.deployment_strategy == 'canary' || github.event.inputs.deployment_strategy != 'all-at-once'
+      id: canary
+      run: |
+        IMAGE_TAG="${{ steps.deploy.outputs.image_tag }}"
+        
+        echo "Starting canary deployment..."
+        
+        python scripts/blue-green-deploy.py \
+          --action canary \
+          --image-tag $IMAGE_TAG \
+          --namespace ${{ env.K8S_NAMESPACE }} \
+          --max-percentage 50 \
+          --duration 15 \
+          --step 10
+        
+        if [ $? -eq 0 ]; then
+          echo "canary_success=true" >> $GITHUB_OUTPUT
+        else
+          echo "canary_success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+    
+    - name: Monitor during canary
+      if: steps.canary.outputs.canary_success == 'true'
+      run: |
+        echo "Monitoring canary deployment for 5 minutes..."
+        
+        python scripts/monitor-blue-green.py \
+          --prometheus-url http://prometheus.monitoring.svc.cluster.local:9090 \
+          --namespace ${{ env.K8S_NAMESPACE }} \
+          --action monitor \
+          --interval 30
+        
+        # Run performance tests
+        TARGET_COLOR="${{ steps.deploy.outputs.target_color }}"
+        SERVICE_URL=$(kubectl get service api-$TARGET_COLOR-service \
+          -n ${{ env.K8S_NAMESPACE }} \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        
+        python scripts/performance_test.py \
+          --url http://$SERVICE_URL \
+          --concurrent 20 \
+          --duration 120
+    
+    - name: Wait for manual approval
+      if: github.event.inputs.deployment_strategy == 'blue-green' && github.event_name != 'workflow_dispatch'
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.token }}
+        approvers: devops-team,engineering-managers
+        minimum-approvals: 2
+        issue-title: "Blue-Green Deployment Approval"
+        issue-body: |
+          Please review the deployment metrics and approve if ready.
+          
+          **New Version:** ${{ steps.deploy.outputs.image_tag }}
+          **Target Environment:** ${{ steps.deploy.outputs.target_color }}
+          
+          **Test Results:**
+          - Smoke Tests: ✅ Passed
+          - API Tests: ✅ Passed
+          - Canary Deployment: ${{ steps.canary.outputs.canary_success == 'true' && '✅ Successful' || '❌ Failed' }}
+          
+          **Next Steps:**
+          1. Review metrics
+          2. Check logs for errors
+          3. Approve to switch traffic
+          4. Reject to rollback
+    
+    - name: Switch traffic to new version
+      if: steps.canary.outputs.canary_success == 'true' || github.event.inputs.deployment_strategy == 'all-at-once'
+      run: |
+        TARGET_COLOR="${{ steps.deploy.outputs.target_color }}"
+        
+        echo "Switching traffic to $TARGET_COLOR"
+        
+        python scripts/blue-green-deploy.py \
+          --action switch \
+          --namespace ${{ env.K8S_NAMESPACE }}
+        
+        # Update configmap
+        kubectl patch configmap blue-green-config \
+          -n ${{ env.K8S_NAMESPACE }} \
+          --type merge \
+          --patch '{"data":{"active-color":"'$TARGET_COLOR'"}}'
+    
+    - name: Run post-deployment tests
+      run: |
+        # Test active deployment
+        python scripts/smoke_test.py \
+          --url https://research-automation.example.com
+        
+        # Test all critical endpoints
+        python scripts/test_critical_endpoints.py \
+          --url https://research-automation.example.com \
+          --timeout 30
+    
+    - name: Rollback on failure
+      if: failure()
+      run: |
+        echo "Deployment failed, initiating rollback..."
+        
+        python scripts/blue-green-deploy.py \
+          --action rollback \
+          --namespace ${{ env.K8S_NAMESPACE }}
+        
+        # Notify team
+        echo "Rollback completed"
+    
+    - name: Clean up old deployment
+      if: success()
+      run: |
+        echo "Cleaning up old deployment..."
+        
+        # Wait 1 hour before cleanup (allows for quick rollback)
+        sleep 3600
+        
+        python scripts/blue-green-deploy.py \
+          --action cleanup \
+          --namespace ${{ env.K8S_NAMESPACE }}
+    
+    - name: Update deployment status
+      run: |
+        DEPLOYMENT_STATUS="success"
+        if [ "${{ job.status }}" != "success" ]; then
+          DEPLOYMENT_STATUS="failed"
+        fi
+        
+        # Send notification
+        curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          -H 'Content-type: application/json' \
+          -d '{
+            "text": "Blue-Green Deployment '${DEPLOYMENT_STATUS}'",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Blue-Green Deployment '${DEPLOYMENT_STATUS}'*"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Repository:*\n${{ github.repository }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Commit:*\n${{ github.sha }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Environment:*\n${{ github.event.inputs.environment || 'production' }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Strategy:*\n${{ github.event.inputs.deployment_strategy || 'canary' }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*New Color:*\n${{ steps.deploy.outputs.target_color }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Status:*\n'${DEPLOYMENT_STATUS}'"
+                  }
+                ]
+              }
+            ]
+          }'
+    
+    - name: Create deployment report
+      if: always()
+      run: |
+        python scripts/create_deployment_report.py \
+          --namespace ${{ env.K8S_NAMESPACE }} \
+          --commit-sha ${{ github.sha }} \
+          --environment ${{ github.event.inputs.environment || 'production' }} \
+          --output deployment-report-${{ github.run_number }}.json
+        
+        # Upload report
+        aws s3 cp deployment-report-${{ github.run_number }}.json \
+          s3://research-automation-logs/deployment-reports/

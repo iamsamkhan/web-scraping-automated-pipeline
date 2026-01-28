@@ -1,0 +1,108 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: research-automation-blue-green
+  namespace: research-automation-bg
+  labels:
+    app: research-automation-api
+spec:
+  selector:
+    matchLabels:
+      app: research-automation-api
+  namespaceSelector:
+    matchNames:
+      - research-automation-bg
+  endpoints:
+  - port: http
+    interval: 15s
+    path: /metrics
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_label_version]
+      targetLabel: deployment_color
+    - sourceLabels: [__meta_kubernetes_pod_label_app]
+      targetLabel: app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-blue-green-rules
+  namespace: monitoring
+data:
+  blue-green-rules.yml: |
+    groups:
+    - name: blue-green-deployment
+      rules:
+      - alert: BlueGreenDeploymentUnhealthy
+        expr: |
+          (
+            up{namespace="research-automation-bg", deployment_color="blue"} == 0
+            or
+            up{namespace="research-automation-bg", deployment_color="green"} == 0
+          )
+        for: 2m
+        labels:
+          severity: critical
+          deployment_type: blue-green
+        annotations:
+          summary: "Blue/Green deployment unhealthy"
+          description: |
+            One of the deployments ({{ $labels.deployment_color }}) is down.
+            Current active: {{ $labels.active_color }}
+          
+      - alert: BlueGreenTrafficImbalance
+        expr: |
+          abs(
+            sum(rate(http_requests_total{namespace="research-automation-bg", deployment_color="blue"}[5m]))
+            -
+            sum(rate(http_requests_total{namespace="research-automation-bg", deployment_color="green"}[5m]))
+          )
+          /
+          sum(rate(http_requests_total{namespace="research-automation-bg"}[5m]))
+          > 0.9  # More than 90% imbalance
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Traffic imbalance between blue/green"
+          description: |
+            Traffic distribution is imbalanced.
+            Blue: {{ $value_blue }}%
+            Green: {{ $value_green }}%
+          
+      - alert: BlueGreenCanaryFailure
+        expr: |
+          (
+            rate(http_requests_total{namespace="research-automation-bg", status=~"5..", deployment_color="green"}[5m])
+            /
+            rate(http_requests_total{namespace="research-automation-bg", deployment_color="green"}[5m])
+          )
+          > 0.1  # More than 10% errors in canary
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Canary deployment failing"
+          description: |
+            Canary deployment (green) has high error rate: {{ $value }}%
+            Consider rolling back.
+          
+      - alert: BlueGreenResponseTimeDegradation
+        expr: |
+          (
+            histogram_quantile(0.95,
+              rate(http_request_duration_seconds_bucket{namespace="research-automation-bg", deployment_color="green"}[5m])
+            )
+            /
+            histogram_quantile(0.95,
+              rate(http_request_duration_seconds_bucket{namespace="research-automation-bg", deployment_color="blue"}[5m])
+            )
+          ) > 1.5  # 50% slower than blue
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Canary response time degradation"
+          description: |
+            Canary deployment is 50% slower than active deployment.
+            Blue P95: {{ $value_blue }}s
+            Green P95: {{ $value_green }}s

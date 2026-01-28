@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-blue
+  namespace: research-automation-bg
+  labels:
+    app: research-automation-api
+    version: "blue"
+    track: stable
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: research-automation-api
+      version: "blue"
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: research-automation-api
+        version: "blue"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - research-automation-api
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: api
+        image: ghcr.io/yourusername/research-automation:v1.2.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: VERSION_COLOR
+          value: "blue"
+        - name: DEPLOYMENT_TRACK
+          value: "stable"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            httpHeaders:
+            - name: X-Deployment-Color
+              value: "blue"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+            httpHeaders:
+            - name: X-Deployment-Color
+              value: "blue"
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-blue-service
+  namespace: research-automation-bg
+  labels:
+    app: research-automation-api
+    version: "blue"
+spec:
+  selector:
+    app: research-automation-api
+    version: "blue"
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http
+  type: ClusterIP

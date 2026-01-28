@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blue-green-config
+  namespace: research-automation-bg
+data:
+  active-color: "blue"
+  canary-percentage: "0"
+  max-canary-percentage: "50"
+  canary-duration-minutes: "30"
+  auto-promotion-enabled: "false"
