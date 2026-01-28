@@ -668,6 +668,143 @@ Generate statistics
 
 Handle failures
 
+
+
+
+ 🚀 CI/CD Pipeline
+This project includes a comprehensive CI/CD pipeline for automated testing, building, and deployment.
+
+Pipeline Stages
+Code Quality & Testing
+
+Python linting (Black, Flake8)
+
+Type checking (MyPy)
+
+Security scanning (Bandit, Safety)
+
+Unit tests with coverage
+
+Integration tests
+
+Docker Build & Scan
+
+Multi-architecture Docker builds
+
+Security vulnerability scanning (Trivy)
+
+Image optimization
+
+Deployment
+
+Staging deployment (auto on develop)
+
+Production deployment (manual approval)
+
+Blue-green deployment strategy
+
+Monitoring
+
+Performance metrics collection
+
+Alert configuration
+
+Log aggregation
+
+Deployment Environments
+Development: Local Docker Compose
+
+Staging: AWS ECS with test data
+
+Production: AWS EKS with high availability
+
+Running Locally
+bash
+# Development environment
+docker-compose -f docker-compose.dev.yml up
+
+# Production simulation
+docker-compose -f docker-compose.prod.yml up
+
+# Run tests
+docker-compose -f docker-compose.test.yml run --rm api pytest
+
+# Run linting
+docker-compose -f docker-compose.test.yml run --rm api black --check app/
+Infrastructure
+Managed with Terraform:
+
+bash
+# Initialize
+cd terraform && terraform init
+
+# Plan changes
+terraform plan -var-file=vars/production.tfvars
+
+# Apply changes
+terraform apply -var-file=vars/production.tfvars
+Monitoring
+Access monitoring dashboards:
+
+Grafana: http://localhost:3000
+
+Prometheus: http://localhost:9090
+
+Alertmanager: http://localhost:9093
+
+📊 Performance Metrics
+The pipeline collects and reports:
+
+Test coverage percentage
+
+Code quality scores
+
+Security vulnerability counts
+
+Build times
+
+Deployment success rates
+
+API response times
+
+🔧 Troubleshooting Pipeline Issues
+Build fails:
+
+bash
+# Check logs
+cat .github/workflows/ci-cd.yml | grep -A 5 -B 5 "failed"
+
+# Run locally
+act -j code-quality
+Deployment fails:
+
+Check AWS credentials
+
+Verify ECS/EKS cluster status
+
+Check resource limits
+
+Tests fail:
+
+bash
+# Run specific test
+pytest tests/test_specific.py -v
+
+# Debug with pdb
+pytest --pdb tests/
+🔐 Security
+All secrets stored in GitHub Secrets
+
+Regular security scans
+
+Dependency updates automated via Dependabot
+
+Least privilege IAM roles
+
+Encrypted data at rest and in transit
+
+This complete CI/CD pipeline ensures automated, reliable, and secure deployments of the Academic Research Automation System across all environments.
+
 Happy Researching! 🎓📚
  
  Shamshad Ahmed 

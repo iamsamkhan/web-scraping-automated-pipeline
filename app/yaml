@@ -1,0 +1,39 @@
+# Required Secrets for GitHub Actions:
+
+# AWS Credentials
+AWS_ACCESS_KEY_ID: ""
+AWS_SECRET_ACCESS_KEY: ""
+AWS_REGION: "us-east-1"
+
+# Staging Environment
+AWS_ACCESS_KEY_ID_STAGING: ""
+AWS_SECRET_ACCESS_KEY_STAGING: ""
+
+# Docker Registry
+DOCKER_REGISTRY: "ghcr.io"
+DOCKER_USERNAME: "yourusername"
+DOCKER_PASSWORD: ""
+
+# Database
+DB_USER: "postgres"
+DB_PASSWORD: ""
+DB_NAME: "research_automation"
+
+# Redis
+REDIS_PASSWORD: ""
+
+# Email
+EMAIL_SENDER: ""
+EMAIL_PASSWORD: ""
+
+# API Keys
+OPENAI_API_KEY: ""
+SECRET_KEY: ""
+
+# Monitoring
+GRAFANA_PASSWORD: ""
+SLACK_WEBHOOK_URL: ""
+SNS_TOPIC_ARN: ""
+
+# Code Quality
+CODECOV_TOKEN: ""

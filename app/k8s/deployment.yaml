@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+  namespace: research-automation
+  labels:
+    app: research-automation-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: research-automation-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: research-automation-api
+    spec:
+      containers:
+      - name: api
+        image: ghcr.io/yourusername/research-automation:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: research-automation-config
+        - secretRef:
+            name: research-automation-secrets
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 1
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: papers
+          mountPath: /app/output/papers
+      volumes:
+      - name: logs
+        persistentVolumeClaim:
+          claimName: logs-pvc
+      - name: papers
+        persistentVolumeClaim:
+          claimName: papers-pvc

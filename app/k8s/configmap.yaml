@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: research-automation-config
+  namespace: research-automation
+data:
+  PYTHONPATH: /app
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
